@@ -11,6 +11,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
+
       - name: Descargar repositorio
         uses: actions/checkout@v4
 
@@ -29,9 +30,13 @@ jobs:
           fi
 
           echo "XCODEPROJ=$XCODEPROJ" >> "$GITHUB_ENV"
-          echo "Proyecto encontrado: $XCODEPROJ"
 
-      - name: Reparar archivo del proyecto
+          echo "======================================"
+          echo "PROYECTO ENCONTRADO"
+          echo "======================================"
+          echo "$XCODEPROJ"
+
+      - name: Diagnosticar y reparar proyecto Xcode
         run: |
           PBXPROJ="$XCODEPROJ/project.pbxproj"
 
@@ -40,19 +45,69 @@ jobs:
             exit 1
           fi
 
-          sed -i '' '1c\
+          echo "======================================"
+          echo "PRIMERAS 10 LINEAS DE project.pbxproj"
+          echo "======================================"
+
+          head -n 10 "$PBXPROJ"
+
+          echo ""
+          echo "======================================"
+          echo "COMPROBANDO CONFLICTOS GIT"
+          echo "======================================"
+
+          if grep -nE '^(<<<<<<<|=======|>>>>>>>)' "$PBXPROJ"; then
+            echo "ERROR: Se encontraron conflictos de Git."
+            exit 1
+          fi
+
+          echo ""
+          echo "======================================"
+          echo "COMPROBANDO CABECERA"
+          echo "======================================"
+
+          FIRST_LINE=$(head -n 1 "$PBXPROJ")
+
+          if [ "$FIRST_LINE" != "// !$*UTF8*$!" ]; then
+            echo "Cabecera incorrecta encontrada:"
+            printf '%s\n' "$FIRST_LINE"
+
+            sed -i '' '1c\
           // !$*UTF8*$!
           ' "$PBXPROJ"
 
-          echo "Archivo project.pbxproj reparado."
+            echo "Cabecera corregida."
+          else
+            echo "Cabecera correcta."
+          fi
+
+          echo ""
+          echo "======================================"
+          echo "TAMAÑO DEL ARCHIVO"
+          echo "======================================"
+
+          wc -c "$PBXPROJ"
+
+          echo ""
+          echo "======================================"
+          echo "FIN DE LA REPARACION"
+          echo "======================================"
 
       - name: Comprobar proyecto Xcode
         run: |
+          echo "======================================"
+          echo "COMPROBANDO XCODE"
+          echo "======================================"
+
           xcodebuild -list -project "$XCODEPROJ"
 
       - name: Compilar aplicación
         run: |
           rm -rf build
+
+          echo "======================================"
+          echo "COMPILANDO OGIOS"
+          echo "======================================"
 
           xcodebuild \
             -project "$XCODEPROJ" \
@@ -64,7 +119,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             build
 
-      - name: Crear IPA sin firmar
+      - name: Buscar aplicación
         run: |
           APP=$(find build/DerivedData/Build/Products -name "*.app" -type d | head -n 1)
 
@@ -73,15 +128,34 @@ jobs:
             exit 1
           fi
 
-          echo "Aplicación encontrada: $APP"
+          echo "======================================"
+          echo "APP ENCONTRADA"
+          echo "======================================"
+          echo "$APP"
+
+          echo "APP=$APP" >> "$GITHUB_ENV"
+
+      - name: Crear IPA sin firmar
+        run: |
+          echo "======================================"
+          echo "CREANDO IPA"
+          echo "======================================"
 
           rm -rf Payload
           mkdir Payload
+
           cp -R "$APP" Payload/
 
           mkdir -p output
+
           cd Payload
-          zip -r ../output/OGIOS-unsigned.ipa "$(basename "$APP")"
+
+          zip -r "../output/OGIOS-unsigned.ipa" "$(basename "$APP")"
+
+          cd ..
+
+          echo "IPA creada:"
+          ls -lh output/OGIOS-unsigned.ipa
 
       - name: Subir IPA como Artifact
         uses: actions/upload-artifact@v4
