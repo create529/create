@@ -22,7 +22,7 @@ jobs:
 
       - name: Localizar proyecto Xcode
         run: |
-          XCODEPROJ=$(find project -name "ThreeOneOSFive.xcodeproj" -type d | head -n 1)
+          XCODEPROJ=$(find project -type d -name "ThreeOneOSFive.xcodeproj" | head -n 1)
 
           if [ -z "$XCODEPROJ" ]; then
             echo "ERROR: No se encontró ThreeOneOSFive.xcodeproj"
@@ -31,35 +31,45 @@ jobs:
 
           echo "XCODEPROJ=$XCODEPROJ" >> "$GITHUB_ENV"
 
-          echo "======================================"
-          echo "PROYECTO ENCONTRADO"
-          echo "======================================"
+          echo "Proyecto encontrado:"
           echo "$XCODEPROJ"
 
-      - name: Diagnosticar y reparar proyecto Xcode
+      - name: Reparar project.pbxproj
         run: |
           PBXPROJ="$XCODEPROJ/project.pbxproj"
 
           if [ ! -f "$PBXPROJ" ]; then
-            echo "ERROR: No se encontró project.pbxproj"
+            echo "ERROR: No existe:"
+            echo "$PBXPROJ"
             exit 1
           fi
 
           echo "======================================"
-          echo "PRIMERAS 10 LINEAS DE project.pbxproj"
+          echo "ARCHIVO ENCONTRADO"
           echo "======================================"
 
-          head -n 10 "$PBXPROJ"
+          ls -lh "$PBXPROJ"
 
           echo ""
           echo "======================================"
-          echo "COMPROBANDO CONFLICTOS GIT"
+          echo "PRIMERAS 20 LINEAS"
           echo "======================================"
 
-          if grep -nE '^(<<<<<<<|=======|>>>>>>>)' "$PBXPROJ"; then
-            echo "ERROR: Se encontraron conflictos de Git."
-            exit 1
-          fi
+          sed -n '1,20p' "$PBXPROJ"
+
+          echo ""
+          echo "======================================"
+          echo "ELIMINANDO BOM"
+          echo "======================================"
+
+          perl -pi -e 's/^\x{FEFF}//' "$PBXPROJ"
+
+          echo ""
+          echo "======================================"
+          echo "CORRIGIENDO SALTOS DE LINEA"
+          echo "======================================"
+
+          perl -pi -e 's/\r\n/\n/g; s/\r/\n/g' "$PBXPROJ"
 
           echo ""
           echo "======================================"
@@ -68,45 +78,63 @@ jobs:
 
           FIRST_LINE=$(head -n 1 "$PBXPROJ")
 
-          if [ "$FIRST_LINE" != "// !$*UTF8*$!" ]; then
-            echo "Cabecera incorrecta encontrada:"
-            printf '%s\n' "$FIRST_LINE"
+          echo "Cabecera actual:"
+          printf '%s\n' "$FIRST_LINE"
 
-            sed -i '' '1c\
-          // !$*UTF8*$!
-          ' "$PBXPROJ"
+          if [ "$FIRST_LINE" != "// !$*UTF8*$!" ]; then
+
+            echo "Cabecera incorrecta."
+            echo "Corrigiendo..."
+
+            TEMP_FILE=$(mktemp)
+
+            printf '%s\n' '// !$*UTF8*$!' > "$TEMP_FILE"
+            tail -n +2 "$PBXPROJ" >> "$TEMP_FILE"
+
+            mv "$TEMP_FILE" "$PBXPROJ"
 
             echo "Cabecera corregida."
+
           else
+
             echo "Cabecera correcta."
+
           fi
 
           echo ""
           echo "======================================"
-          echo "TAMAÑO DEL ARCHIVO"
+          echo "BUSCANDO CONFLICTOS DE GIT"
           echo "======================================"
 
-          wc -c "$PBXPROJ"
+          if grep -nE '^(<<<<<<<|=======|>>>>>>>)' "$PBXPROJ"; then
+            echo ""
+            echo "ERROR: El proyecto contiene conflictos de Git."
+            exit 1
+          fi
 
           echo ""
           echo "======================================"
-          echo "FIN DE LA REPARACION"
+          echo "PRIMERAS 5 LINEAS DESPUES DE REPARAR"
           echo "======================================"
+
+          sed -n '1,5p' "$PBXPROJ"
 
       - name: Comprobar proyecto Xcode
         run: |
           echo "======================================"
-          echo "COMPROBANDO XCODE"
+          echo "XCODEBUILD - LIST"
           echo "======================================"
 
-          xcodebuild -list -project "$XCODEPROJ"
+          xcodebuild \
+            -list \
+            -project "$XCODEPROJ"
 
       - name: Compilar aplicación
         run: |
           rm -rf build
 
           echo "======================================"
-          echo "COMPILANDO OGIOS"
+          echo "COMPILANDO"
           echo "======================================"
 
           xcodebuild \
@@ -124,23 +152,17 @@ jobs:
           APP=$(find build/DerivedData/Build/Products -name "*.app" -type d | head -n 1)
 
           if [ -z "$APP" ]; then
-            echo "ERROR: No se encontró ningún archivo .app"
+            echo "ERROR: No se encontró ningún .app"
             exit 1
           fi
 
-          echo "======================================"
-          echo "APP ENCONTRADA"
-          echo "======================================"
+          echo "Aplicación encontrada:"
           echo "$APP"
 
           echo "APP=$APP" >> "$GITHUB_ENV"
 
-      - name: Crear IPA sin firmar
+      - name: Crear IPA
         run: |
-          echo "======================================"
-          echo "CREANDO IPA"
-          echo "======================================"
-
           rm -rf Payload
           mkdir Payload
 
@@ -154,10 +176,13 @@ jobs:
 
           cd ..
 
-          echo "IPA creada:"
+          echo "======================================"
+          echo "IPA CREADA"
+          echo "======================================"
+
           ls -lh output/OGIOS-unsigned.ipa
 
-      - name: Subir IPA como Artifact
+      - name: Subir IPA
         uses: actions/upload-artifact@v4
         with:
           name: OGIOS-IPA
