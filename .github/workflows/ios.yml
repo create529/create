@@ -3,7 +3,8 @@ name: Build iOS IPA
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
+    branches:
+      - main
 
 jobs:
   build:
@@ -15,30 +16,47 @@ jobs:
 
       - name: Descomprimir proyecto
         run: |
+          mkdir -p project
           unzip -o "OGIOS - SOURCE FULL.zip" -d project
 
-      - name: Buscar proyecto Xcode
+      - name: Localizar proyecto Xcode
         run: |
-          XCODEPROJ=$(find project -name "*.xcodeproj" -type d | head -n 1)
+          XCODEPROJ=$(find project -name "ThreeOneOSFive.xcodeproj" -type d | head -n 1)
+
+          if [ -z "$XCODEPROJ" ]; then
+            echo "ERROR: No se encontró ThreeOneOSFive.xcodeproj"
+            exit 1
+          fi
+
           echo "XCODEPROJ=$XCODEPROJ" >> "$GITHUB_ENV"
           echo "Proyecto encontrado: $XCODEPROJ"
 
-      - name: Compilar aplicación iOS
+      - name: Reparar archivo del proyecto
         run: |
-          mkdir -p build
+          PBXPROJ="$XCODEPROJ/project.pbxproj"
 
-          SCHEME=$(xcodebuild -list -project "$XCODEPROJ" \
-            | grep -A 20 "Schemes:" \
-            | tail -n +2 \
-            | sed '/^[[:space:]]*$/q' \
-            | head -n 1 \
-            | xargs)
+          if [ ! -f "$PBXPROJ" ]; then
+            echo "ERROR: No se encontró project.pbxproj"
+            exit 1
+          fi
 
-          echo "Scheme encontrado: $SCHEME"
+          sed -i '' '1c\
+          // !$*UTF8*$!
+          ' "$PBXPROJ"
+
+          echo "Archivo project.pbxproj reparado."
+
+      - name: Comprobar proyecto Xcode
+        run: |
+          xcodebuild -list -project "$XCODEPROJ"
+
+      - name: Compilar aplicación
+        run: |
+          rm -rf build
 
           xcodebuild \
             -project "$XCODEPROJ" \
-            -scheme "$SCHEME" \
+            -scheme "OGIOS" \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build/DerivedData \
@@ -46,20 +64,28 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             build
 
-      - name: Crear IPA
+      - name: Crear IPA sin firmar
         run: |
           APP=$(find build/DerivedData/Build/Products -name "*.app" -type d | head -n 1)
 
-          echo "APP encontrada: $APP"
+          if [ -z "$APP" ]; then
+            echo "ERROR: No se encontró ningún archivo .app"
+            exit 1
+          fi
 
-          mkdir -p Payload
+          echo "Aplicación encontrada: $APP"
+
+          rm -rf Payload
+          mkdir Payload
           cp -R "$APP" Payload/
 
           mkdir -p output
-          zip -r output/app-unsigned.ipa Payload
+          cd Payload
+          zip -r ../output/OGIOS-unsigned.ipa "$(basename "$APP")"
 
-      - name: Subir IPA
+      - name: Subir IPA como Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: iOS-IPA
-          path: output/app-unsigned.ipa
+          name: OGIOS-IPA
+          path: output/OGIOS-unsigned.ipa
+          if-no-files-found: error
