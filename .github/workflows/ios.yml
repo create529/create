@@ -1,0 +1,65 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Descomprimir proyecto
+        run: |
+          unzip -o "OGIOS - SOURCE FULL.zip" -d project
+
+      - name: Buscar proyecto Xcode
+        run: |
+          XCODEPROJ=$(find project -name "*.xcodeproj" -type d | head -n 1)
+          echo "XCODEPROJ=$XCODEPROJ" >> "$GITHUB_ENV"
+          echo "Proyecto encontrado: $XCODEPROJ"
+
+      - name: Compilar aplicación iOS
+        run: |
+          mkdir -p build
+
+          SCHEME=$(xcodebuild -list -project "$XCODEPROJ" \
+            | grep -A 20 "Schemes:" \
+            | tail -n +2 \
+            | sed '/^[[:space:]]*$/q' \
+            | head -n 1 \
+            | xargs)
+
+          echo "Scheme encontrado: $SCHEME"
+
+          xcodebuild \
+            -project "$XCODEPROJ" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Crear IPA
+        run: |
+          APP=$(find build/DerivedData/Build/Products -name "*.app" -type d | head -n 1)
+
+          echo "APP encontrada: $APP"
+
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+
+          mkdir -p output
+          zip -r output/app-unsigned.ipa Payload
+
+      - name: Subir IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: iOS-IPA
+          path: output/app-unsigned.ipa
